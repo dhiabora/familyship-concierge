@@ -6,59 +6,69 @@ import pandas as pd
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 SHEET_URL = st.secrets["SHEET_URL"]
 
+# Geminiの設定（1.5-flashが無料枠で最も安定しています）
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # 2. データの読み込み
 @st.cache_data
 def load_data():
-    # スプレッドシートのURLをCSV出力形式に変換
-    # 複数のシートがある場合、一番左のシートが読み込まれます
-    csv_url = SHEET_URL.split('/edit')[0] + '/export?format=csv'
-    df = pd.read_csv(csv_url)
-    return df
+    try:
+        # 共有URLからCSVエクスポート用URLを作成
+        # gid=0を指定することで、一番左のシートを強制的に読み込みます
+        base_url = SHEET_URL.split('/edit')[0]
+        csv_url = f"{base_url}/export?format=csv&gid=0"
+        df = pd.read_csv(csv_url)
+        # 空白の行や列を削除
+        df = df.dropna(how='all').dropna(axis=1, how='all')
+        return df
+    except Exception as e:
+        st.error(f"データの読み込みに失敗しました: {e}")
+        return pd.DataFrame()
 
+# アプリの画面構成
+st.set_page_config(page_title="ファミリーシップ・コンシェルジュ", page_icon="👶")
 st.title("👶 ファミリーシップ・コンシェルジュ")
 
-try:
-    df = load_data()
-    
-    # 【確認用】読み込んだデータの行数を表示（あとで消せます）
-    st.write(f"現在、{len(df)} 件の講座データを読み込んでいます。")
-    if len(df) > 0:
-        with st.expander("読み込んだデータの一部を確認する"):
-            st.dataframe(df.head()) # 最初の5行を表示
+df = load_data()
 
-    user_input = st.chat_input("例：夜泣きについて相談したい")
+# 【デバッグ用】読み込み状況を確認（動作確認ができたら削除してOK）
+st.sidebar.write(f"読み込み件数: {len(df)} 件")
+if not df.empty:
+    with st.sidebar.expander("読み込んだデータの中身を確認"):
+        st.write(df.head())
 
-    if user_input:
+# メインチャット
+user_input = st.chat_input("例：イヤイヤ期の対応を知りたい")
+
+if user_input:
+    if df.empty:
+        st.warning("講座データが読み込めていません。スプレッドシートの共有設定やURLを確認してください。")
+    else:
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # AIへの指示（プロンプト）
-        # 確実にデータを認識させるため、json形式で渡すように変更
-        context_json = df.to_json(orient='records', force_ascii=False)
+        # 講座リストをAIに渡す（列名を明示）
+        context = df.to_string(index=False)
         
         prompt = f"""
-        あなたは子育てサロンの優秀なコンシェルジュです。
-        以下の【講座データ(JSON形式)】をもとに、ユーザーの悩みに答えてください。
+        あなたは子育てサロン「ファミリーシップ」のコンシェルジュです。
+        以下の【講座リスト】をもとに、ユーザーの悩みに答えてください。
         
-        【講座データ】
-        {context_json}
+        【講座リスト】
+        {context}
         
-        【指示】
-        ・ユーザーの悩みに合う講座を最大3つ選んでください。
-        ・「講座名」「講師名」「おすすめ理由」「URL」を答えてください。
-        ・もし該当するものがなければ、似た分野の講座を提案するか、寄り添うメッセージを伝えてください。
-        ・データベースにないデタラメなURLは絶対に作らないでください。
+        【ルール】
+        ・「講座タイトル」「講師名」「対象年齢」「内容」「該当URL」の情報を活用してください。
+        ・最適な講座を最大3つ選んで、そのURLを必ず提示してください。
+        ・優しく温かい言葉で回答してください。
+        ・リストにない情報は「申し訳ありませんが、該当する講座が見つかりませんでした」と答えてください。
         
-        【ユーザーの相談】
+        【相談内容】
         {user_input}
         """
 
         with st.chat_message("assistant"):
-            response = model.generate_content(prompt)
-            st.markdown(response.text)
-
-except Exception as e:
-    st.error(f"エラーが発生しました: {e}")
+            with st.spinner("考え中..."):
+                response = model.generate_content(prompt)
+                st.markdown(response.text)
