@@ -2,52 +2,53 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 
-# 1. 初期設定（セキュリティのためAPIキーはStreamlitの設定から読み込みます）
+# 1. 初期設定（Secretsから安全に読み込みます）
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-SHEET_URL = st.secrets["SHEET_URL"] # スプレッドシートのCSVエクスポートURL
+SHEET_URL = st.secrets["SHEET_URL"]
 
+# Gemini 2.5 Flashの設定
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
-# 2. データの読み込み
+# 2. データの読み込み（キャッシュ機能で高速化）
 @st.cache_data
 def load_data():
-    # スプレッドシートをCSV形式で読み込みます
-    url = SHEET_URL.replace('/edit?usp=sharing', '/export?format=csv')
-    df = pd.read_csv(url)
-    return df
+    # スプレッドシートのURLをCSV出力形式に変換して読み込み
+    csv_url = SHEET_URL.split('/edit')[0] + '/export?format=csv'
+    return pd.read_csv(csv_url)
 
-# アプリのタイトル
-st.title("育児講座コンシェルジュ")
-st.write("あなたのお悩みにぴったりの講座をご案内します。")
+# アプリの画面構成
+st.set_page_config(page_title="ファミリーシップ・コンシェルジュ", page_icon="👶")
+st.title("👶 ファミリーシップ・コンシェルジュ")
+st.info("オンラインサロンの全講座から、あなたにぴったりの内容をご提案します。")
 
 try:
     df = load_data()
     
-    # ユーザーの入力
-    user_input = st.chat_input("例：1歳の夜泣きについて知りたい")
+    user_input = st.chat_input("例：1歳の夜泣きについて相談したい")
 
     if user_input:
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # AIへの指示（プロンプト）の作成
-        # ナレッジを保護しつつ、適切な講座を提案させるための魔法の文章です
+        # 講座リストをテキストに変換してAIに渡す
         context = df.to_string(index=False)
+        
+        # AIへの指示（システムプロンプト）
         prompt = f"""
-        あなたは子育てサロンの優しく頼れるコンシェルジュです。
-        以下の【講座データベース】の内容をもとに、ユーザーの悩みに答えてください。
+        あなたは子育てサロン「ファミリーシップ」の優秀なコンシェルジュです。
+        以下の【講座リスト】をもとに、ユーザーの悩みに答えてください。
         
         【ルール】
-        ・おすすめの講座を最大3つ提案してください。
-        ・回答には「講座名」「講師名」「なぜおすすめか」「視聴URL」を必ず含めてください。
-        ・データベースにない情報は答えないでください。
-        ・データベースの生データをそのまま出力せず、お母さんに寄り添う言葉で回答してください。
+        ・最適な講座を最大3つピックアップしてください。
+        ・「講座名」「講師名」「おすすめする理由」「視聴URL」をセットで伝えてください。
+        ・温かく、お母さんの心に寄り添う丁寧な言葉遣いで回答してください。
+        ・リストにないURLや情報は絶対に作り出さないでください。
         
-        【講座データベース】
+        【講座リスト】
         {context}
         
-        【ユーザーの質問】
+        【ユーザーの相談】
         {user_input}
         """
 
@@ -56,4 +57,4 @@ try:
             st.markdown(response.text)
 
 except Exception as e:
-    st.error("データの読み込みに失敗しました。URLや設定を確認してください。")
+    st.error("データの読み込み中にエラーが発生しました。設定（Secrets）のURLやAPIキーを確認してください。")
