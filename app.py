@@ -2,51 +2,55 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 
-# 1. 初期設定（Secretsから安全に読み込みます）
+# 1. 初期設定
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 SHEET_URL = st.secrets["SHEET_URL"]
 
-# Gemini 2.5 Flashの設定
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 2. データの読み込み（キャッシュ機能で高速化）
+# 2. データの読み込み
 @st.cache_data
 def load_data():
-    # スプレッドシートのURLをCSV出力形式に変換して読み込み
+    # スプレッドシートのURLをCSV出力形式に変換
+    # 複数のシートがある場合、一番左のシートが読み込まれます
     csv_url = SHEET_URL.split('/edit')[0] + '/export?format=csv'
-    return pd.read_csv(csv_url)
+    df = pd.read_csv(csv_url)
+    return df
 
-# アプリの画面構成
-st.set_page_config(page_title="ねんねママのファミリーシップ・コンシェルジュ", page_icon="👶")
-st.title("👶 ねんねママのファミリーシップ・コンシェルジュ")
-st.info("全講座から、あなたにぴったりの内容をご提案します。")
+st.title("👶 ファミリーシップ・コンシェルジュ")
 
 try:
     df = load_data()
     
-    user_input = st.chat_input("例：1歳の夜泣きについて相談したい")
+    # 【確認用】読み込んだデータの行数を表示（あとで消せます）
+    st.write(f"現在、{len(df)} 件の講座データを読み込んでいます。")
+    if len(df) > 0:
+        with st.expander("読み込んだデータの一部を確認する"):
+            st.dataframe(df.head()) # 最初の5行を表示
+
+    user_input = st.chat_input("例：夜泣きについて相談したい")
 
     if user_input:
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # 講座リストをテキストに変換してAIに渡す
-        context = df.to_string(index=False)
+        # AIへの指示（プロンプト）
+        # 確実にデータを認識させるため、json形式で渡すように変更
+        context_json = df.to_json(orient='records', force_ascii=False)
         
-        # AIへの指示（システムプロンプト）
         prompt = f"""
-        あなたは「ねんねママのファミリーシップ」の優秀なコンシェルジュです。
-        以下の【講座リスト】をもとに、ユーザーの悩みに答えてください。
+        あなたは子育てサロンの優秀なコンシェルジュです。
+        以下の【講座データ(JSON形式)】をもとに、ユーザーの悩みに答えてください。
         
-        【ルール】
-        ・最適な講座を最大3つピックアップしてください。
-        ・「講座名」「講師名」「おすすめする理由」「視聴URL」をセットで伝えてください。
-        ・温かく、お母さんの心に寄り添う丁寧な言葉遣いで回答してください。
-        ・リストにないURLや情報は絶対に作り出さないでください。
+        【講座データ】
+        {context_json}
         
-        【講座リスト】
-        {context}
+        【指示】
+        ・ユーザーの悩みに合う講座を最大3つ選んでください。
+        ・「講座名」「講師名」「おすすめ理由」「URL」を答えてください。
+        ・もし該当するものがなければ、似た分野の講座を提案するか、寄り添うメッセージを伝えてください。
+        ・データベースにないデタラメなURLは絶対に作らないでください。
         
         【ユーザーの相談】
         {user_input}
@@ -57,4 +61,4 @@ try:
             st.markdown(response.text)
 
 except Exception as e:
-    st.error("データの読み込み中にエラーが発生しました。設定（Secrets）のURLやAPIキーを確認してください。")
+    st.error(f"エラーが発生しました: {e}")
